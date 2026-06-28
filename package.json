@@ -1,0 +1,23 @@
+{
+  "name": "hera",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Hera — art de la table & decoration. A preview site for the Hammamet boutique.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "gsap": "^3.12.5",
+    "lenis": "^1.1.14",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.3",
+    "vite": "^5.4.10"
+  }
+}
