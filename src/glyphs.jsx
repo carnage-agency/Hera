@@ -1,7 +1,6 @@
 // HERA — hand-drawn line-art glyphs for the table pieces.
 // Brand-locked stroke colors so they read the same wherever they're placed.
 const INK = '#2B2722'
-const TEAL = '#437E79'
 const GOLD = '#B5893C'
 
 const base = { fill: 'none', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round' }
@@ -26,8 +25,8 @@ export function Glyph({ kind, size = 60 }) {
     case 'centre':
       return (
         <svg {...common}>
-          <path d="M27 32 H45 L42 47 Q36 52 30 47 Z" {...base} stroke={TEAL} />
-          <path d="M36 32 C33 23 28 19 24 16 M36 32 C39 23 44 19 48 16 M36 32 V13" {...base} stroke={TEAL} />
+          <path d="M27 32 H45 L42 47 Q36 52 30 47 Z" {...base} stroke={GOLD} />
+          <path d="M36 32 C33 23 28 19 24 16 M36 32 C39 23 44 19 48 16 M36 32 V13" {...base} stroke={GOLD} />
         </svg>
       )
     case 'bougie':
@@ -49,8 +48,8 @@ export function Glyph({ kind, size = 60 }) {
     case 'serviette':
       return (
         <svg {...common}>
-          <path d="M21 22 H51 V52 H21 Z" {...base} stroke={TEAL} />
-          <path d="M21 22 L36 37 L51 22 M30 52 V41" {...base} stroke={TEAL} />
+          <path d="M21 22 H51 V52 H21 Z" {...base} stroke={GOLD} />
+          <path d="M21 22 L36 37 L51 22 M30 52 V41" {...base} stroke={GOLD} />
         </svg>
       )
     case 'carafe':
@@ -63,8 +62,8 @@ export function Glyph({ kind, size = 60 }) {
     case 'decor':
       return (
         <svg {...common}>
-          <path d="M28 30 C24 40 26 52 36 56 C46 52 48 40 44 30 Z" {...base} stroke={TEAL} />
-          <path d="M30 30 Q36 22 42 30" {...base} stroke={TEAL} />
+          <path d="M28 30 C24 40 26 52 36 56 C46 52 48 40 44 30 Z" {...base} stroke={GOLD} />
+          <path d="M30 30 Q36 22 42 30" {...base} stroke={GOLD} />
           <circle cx="36" cy="20" r="4" {...base} stroke={GOLD} />
         </svg>
       )

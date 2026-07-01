@@ -1,11 +1,31 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import Lenis from 'lenis'
 import { Glyph } from './glyphs.jsx'
+import CursorArrow from './CursorArrow.jsx'
+import {
+  PRODUCTS, PRODUCT_BY_ID, CATEGORIES, CATEGORY_LABEL,
+  WHATSAPP, formatPrice, productByKind,
+} from './products.js'
+import { IG_FEED, IG_URL, IG_HANDLE, IG_FOLLOWERS } from './instagram.js'
 
 gsap.registerPlugin(ScrollTrigger)
+
+const CART_KEY = 'hera-cart'
+
+/* compose a WhatsApp order deep-link from cart lines */
+function whatsappOrder(lines, total, intro) {
+  const body = [
+    intro || 'Bonjour Hera \u273A, je souhaite commander :',
+    '',
+    ...lines.map((l) => `\u2022 ${l.qty} \u00d7 ${l.name} \u2014 ${formatPrice(l.price * l.qty)}`),
+    '',
+    `Total : ${formatPrice(total)}`,
+  ].join('\n')
+  return `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(body)}`
+}
 
 /* domain-warped fbm marble — same technique as the soft hero, Hera's palette */
 const VERT = /* glsl */ `
@@ -43,24 +63,15 @@ const FRAG = /* glsl */ `
   }
 `
 const HERO_PAL = {
-  base: [0.957, 0.937, 0.902], // warm ivory paper
-  flow: [0.27, 0.49, 0.47],    // muted peacock-teal pigment
-  hi: [0.80, 0.57, 0.44],      // terracotta bloom
+  base: [0.96, 0.93, 0.86],    // warm ivory
+  flow: [0.68, 0.50, 0.22],    // antique gold swirls
+  hi: [0.14, 0.12, 0.10],      // ink-black veins
   speed: 0.05,
-  glow: 0.5,                   // the cursor reads like a wet brush
+  glow: 0.5,
 }
 
-const PLANCHES = [
-  { roman: 'I', kind: 'assiette', title: 'Service en grès', caption: 'présenté au calme' },
-  { roman: 'II', kind: 'verre', title: 'Verrerie soufflée', caption: 'la lumière, retenue' },
-  { roman: 'III', kind: 'centre', title: 'Centre de table', caption: 'fleurs de saison, sans bruit' },
-  { roman: 'IV', kind: 'couvert', title: 'Couverts dorés', caption: 'le détail, à peine' },
-  { roman: 'V', kind: 'carafe', title: 'Carafes & pichets', caption: 'verser, lentement' },
-  { roman: 'VI', kind: 'decor', title: 'Décor de maison', caption: 'objets choisis' },
-]
-
-const PALETTE = ['assiette', 'verre', 'centre', 'bougie', 'couvert', 'serviette']
-const PALETTE_LABELS = { assiette: 'assiette', verre: 'verre', centre: 'centre', bougie: 'bougie', couvert: 'couvert', serviette: 'serviette' }
+const PALETTE = ['assiette', 'verre', 'centre', 'carafe', 'decor']
+const PALETTE_LABELS = { assiette: 'assiette', verre: 'verre', centre: 'présentoir', carafe: 'pichet', decor: 'déco' }
 const MARQUEE = 'l\u2019art de recevoir \u273A verrerie souffl\u00e9e \u273A gr\u00e8s \u273A centres de table \u273A d\u00e9coration \u273A Hammamet \u273A '
 
 const prefersReduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -119,6 +130,7 @@ export default function Hera() {
   const glowRef = useRef(null)
   const marqueeRef = useRef(null)
   const tableRef = useRef(null)
+  const ctaRef = useRef(null)
 
   const [placed, setPlaced] = useState([])
   const [dragId, setDragId] = useState(null)
@@ -127,6 +139,80 @@ export default function Hera() {
   const introRef = useRef(null)
   const drag = useRef({ id: null, offX: 0, offY: 0 })
   const idc = useRef(1)
+
+  /* ---- boutique + panier ---- */
+  const [filter, setFilter] = useState('all')
+  const [activeId, setActiveId] = useState(null)          // product open in the modal
+  const [cartOpen, setCartOpen] = useState(false)
+  const [added, setAdded] = useState(null)                 // id that just flashed "ajouté"
+  const [cart, setCart] = useState(() => {
+    if (typeof window === 'undefined') return []
+    try { return JSON.parse(window.localStorage.getItem(CART_KEY)) || [] } catch { return [] }
+  })
+
+  useEffect(() => {
+    try { window.localStorage.setItem(CART_KEY, JSON.stringify(cart)) } catch { /* ignore */ }
+  }, [cart])
+
+  const addToCart = useCallback((id, qty = 1) => {
+    setCart((prev) => {
+      const found = prev.find((l) => l.id === id)
+      if (found) return prev.map((l) => (l.id === id ? { ...l, qty: l.qty + qty } : l))
+      return [...prev, { id, qty }]
+    })
+    setAdded(id)
+    window.clearTimeout(addToCart._t)
+    addToCart._t = window.setTimeout(() => setAdded(null), 1300)
+  }, [])
+
+  const setQty = useCallback((id, qty) => {
+    setCart((prev) => prev.flatMap((l) => (l.id === id ? (qty <= 0 ? [] : [{ ...l, qty }]) : [l])))
+  }, [])
+  const removeFromCart = useCallback((id) => setCart((prev) => prev.filter((l) => l.id !== id)), [])
+  const clearCart = useCallback(() => setCart([]), [])
+
+  const cartLines = useMemo(
+    () => cart.map((l) => ({ ...l, ...PRODUCT_BY_ID[l.id] })).filter((l) => l.name),
+    [cart],
+  )
+  const cartCount = useMemo(() => cartLines.reduce((n, l) => n + l.qty, 0), [cartLines])
+  const cartTotal = useMemo(() => cartLines.reduce((n, l) => n + l.price * l.qty, 0), [cartLines])
+
+  const shown = useMemo(
+    () => (filter === 'all' ? PRODUCTS : PRODUCTS.filter((p) => p.category === filter)),
+    [filter],
+  )
+  const activeProduct = activeId ? PRODUCT_BY_ID[activeId] : null
+
+  /* the dressage as real, priced pieces */
+  const dresserGroups = useMemo(() => {
+    const m = {}
+    placed.forEach((it) => {
+      const prod = productByKind(it.kind)
+      if (!prod) return
+      if (!m[prod.id]) m[prod.id] = { ...prod, qty: 0 }
+      m[prod.id].qty += 1
+    })
+    return Object.values(m)
+  }, [placed])
+  const dresserTotal = useMemo(
+    () => dresserGroups.reduce((n, l) => n + l.price * l.qty, 0),
+    [dresserGroups],
+  )
+
+  const addDressageToCart = useCallback(() => {
+    dresserGroups.forEach((g) => addToCart(g.id, g.qty))
+    setCartOpen(true)
+  }, [dresserGroups, addToCart])
+
+  /* lock scroll while the modal or panier is open */
+  useEffect(() => {
+    const open = activeId || cartOpen
+    document.documentElement.style.overflow = open ? 'hidden' : ''
+    const onKey = (e) => { if (e.key === 'Escape') { setActiveId(null); setCartOpen(false) } }
+    if (open) window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [activeId, cartOpen])
 
   /* ---- opening curtain: settles in, then lifts to reveal the hero ---- */
   useEffect(() => {
@@ -272,20 +358,6 @@ export default function Hera() {
         })
       })
 
-      // collection: planches lift in, stagger, with a whisper of rotation
-      ScrollTrigger.batch('.h-figure', {
-        start: 'top 88%',
-        onEnter: (batch) => gsap.fromTo(batch,
-          { opacity: 0, y: 48, rotateZ: -1.5 },
-          { opacity: 1, y: 0, rotateZ: 0, duration: 0.95, ease: 'power3.out', stagger: 0.12, overwrite: true }),
-      })
-      gsap.set('.h-figure', { opacity: 0 })
-
-      // plate art floats gently, forever
-      self.selector('.h-plate svg').forEach((el, i) => {
-        gsap.to(el, { y: 9, duration: 3 + (i % 3) * 0.6, ease: 'sine.inOut', repeat: -1, yoyo: true, delay: i * 0.25 })
-      })
-
       // drifting ornaments — slow parallax + float
       self.selector('.h-drift span').forEach((el, i) => {
         const dir = i % 2 ? 1 : -1
@@ -391,6 +463,7 @@ export default function Hera() {
   return (
     <div className="h-root" ref={rootRef}>
       <div className="h-grain" aria-hidden="true" />
+      <CursorArrow targetRef={ctaRef} />
 
       <nav className="h-nav" ref={navRef}>
         <a className="h-brand" href="#top">
@@ -398,10 +471,20 @@ export default function Hera() {
           <span className="h-brand-tag">art de la table</span>
         </a>
         <div className="h-nav-links">
-          <a href="#collection">La collection</a>
+          <a href="#collection">La boutique</a>
           <a href="#dresser">Dresser la table</a>
-          <a href="#recevoir">L'art de recevoir</a>
+          <a href="#fil">Le fil</a>
           <a className="h-nav-cta" href="#contact">Nous contacter</a>
+          <button
+            type="button"
+            className={`h-cart-btn ${cartCount ? 'has-items' : ''}`}
+            onClick={() => setCartOpen(true)}
+            aria-label={`Panier, ${cartCount} pièce${cartCount > 1 ? 's' : ''}`}
+          >
+            <span className="h-cart-ico" aria-hidden="true">✻</span>
+            <span className="h-cart-word">Panier</span>
+            {cartCount > 0 && <span className="h-cart-count">{cartCount}</span>}
+          </button>
         </div>
       </nav>
 
@@ -412,20 +495,26 @@ export default function Hera() {
 
         <div className="h-margin h-margin-l" aria-hidden="true">№ 01 — la table</div>
         <div className="h-margin h-margin-r" aria-hidden="true">set in Fraunces &amp; Jost</div>
-        <div className="h-margin h-margin-b" aria-hidden="true">pigment · ivoire — sauge — or</div>
+        <div className="h-margin h-margin-b" aria-hidden="true">pigment · ivoire — noir — or</div>
 
         <div className="h-hero-inner">
           <div className="h-kicker"><span className="star">✺</span> Hammamet · 10h—20h</div>
           <h1>
             <span className="line"><Letters text="L'art de" immediate /></span>
-            <span className="h-underline-wrap">
-              <Letters text="recevoir" immediate /><span>.</span>
+            <span className="h-underline-wrap h-glass-word">
+              <Letters text="recevoir" immediate /><span className="h-glass-dot">.</span>
               <svg className="h-underline draw" viewBox="0 0 340 34" preserveAspectRatio="none" aria-hidden="true">
                 <defs>
                   <linearGradient id="heraStroke" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0" stopColor="#B5893C" />
-                    <stop offset="0.6" stopColor="#437E79" />
-                    <stop offset="1" stopColor="#2E605E" />
+                    <stop offset="0" stopColor="#b8dde6">
+                      <animate attributeName="stop-color" values="#b8dde6;#6fa8b8;#d4eef4;#b8dde6" dur="10s" repeatCount="indefinite" />
+                    </stop>
+                    <stop offset="0.5" stopColor="#5a9eaa">
+                      <animate attributeName="stop-color" values="#5a9eaa;#8ec5d0;#4a8a96;#5a9eaa" dur="10s" repeatCount="indefinite" />
+                    </stop>
+                    <stop offset="1" stopColor="#a8d4dc">
+                      <animate attributeName="stop-color" values="#a8d4dc;#5a9eaa;#c8e8ee;#a8d4dc" dur="10s" repeatCount="indefinite" />
+                    </stop>
                   </linearGradient>
                 </defs>
                 <path d="M4 22 C 60 8, 120 30, 178 18 S 300 6, 336 16" />
@@ -435,7 +524,7 @@ export default function Hera() {
           <p className="h-hero-echo">the art of receiving — kept warm, kept calm.</p>
           <p className="h-hero-lede">Verrerie soufflée, grès et pièces de centre — réunis à Hammamet pour celles et ceux qui aiment dresser une belle table.</p>
           <div className="h-hero-cta">
-            <a className="h-btn h-btn-solid" href="#collection">Voir la collection</a>
+            <a ref={ctaRef} className="h-btn h-btn-solid" href="#collection">Voir la boutique</a>
             <a className="h-btn h-btn-ghost" href="#contact">Nous rendre visite</a>
           </div>
         </div>
@@ -454,41 +543,68 @@ export default function Hera() {
         </div>
       </div>
 
-      {/* ---------- LA COLLECTION ---------- */}
+      {/* ---------- LA BOUTIQUE ---------- */}
       <section className="h-section" id="collection">
         <div className="h-drift" aria-hidden="true"><span>✺</span><span>❧</span><span>✺</span></div>
         <div className="h-wrap h-layer">
           <div className="h-coll-head">
             <div>
-              <div className="h-eyebrow">№ 02 — la collection</div>
-              <h2 className="h-h2"><Letters text="La collection" /></h2>
+              <div className="h-eyebrow">№ 02 — la boutique</div>
+              <h2 className="h-h2"><Letters text="La boutique" /></h2>
               <span className="h-gild" aria-hidden="true" />
             </div>
-            <p className="h-coll-note">Chaque pièce présentée comme une planche — encadrée, posée, présentée au calme.<br /><em>presented like prints.</em></p>
+            <p className="h-coll-note">Chaque pièce, choisie puis présentée comme une planche. Ajoutez au panier — la commande part sur WhatsApp.<br /><em>chosen pieces, delivered with care.</em></p>
           </div>
 
-          <div className="h-planche-rule">
-            <span className="from">planche 01</span>
-            <span className="dash" />
-            <span>06</span>
+          <div className="h-filters" role="tablist" aria-label="Catégories">
+            {CATEGORIES.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                role="tab"
+                aria-selected={filter === c.id}
+                className={`h-filter ${filter === c.id ? 'is-on' : ''}`}
+                onClick={() => setFilter(c.id)}
+              >
+                {c.label}
+              </button>
+            ))}
           </div>
 
           <div className="h-grid">
-            {PLANCHES.map((p) => (
-              <figure className="h-figure" key={p.roman}>
-                <div className="h-mat">
-                  <div className="h-plate">
-                    <span className="roman">planche {p.roman}</span>
-                    <Glyph kind={p.kind} size={96} />
-                    <span className="stub">photographie à venir</span>
+            {shown.map((p) => (
+              <Reveal as="figure" className="h-figure" key={p.id}>
+                <button type="button" className="h-plate-btn" onClick={() => setActiveId(p.id)} aria-label={`Voir ${p.name}`}>
+                  <div className="h-mat">
+                    <div className={`h-plate ${p.image ? 'has-photo' : ''}`}>
+                      <span className="roman">{CATEGORY_LABEL[p.category]}</span>
+                      {p.image ? (
+                        <img className="h-plate-img" src={p.image} alt={p.name} loading="lazy" />
+                      ) : (
+                        <>
+                          <Glyph kind={p.kind} size={96} />
+                          <span className="stub">photographie à venir</span>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
+                </button>
                 <figcaption className="h-cap">
-                  <span className="tag">planche {p.roman}</span>
-                  <h3>{p.title}</h3>
-                  <p>{p.caption}</p>
+                  <span className="tag">{CATEGORY_LABEL[p.category]}</span>
+                  <h3>{p.name}</h3>
+                  <p>{p.materials}</p>
+                  <div className="h-cap-foot">
+                    <span className="h-price">{formatPrice(p.price)}<em> · {p.unit}</em></span>
+                    <button
+                      type="button"
+                      className={`h-add ${added === p.id ? 'is-added' : ''}`}
+                      onClick={() => addToCart(p.id)}
+                    >
+                      {added === p.id ? 'Ajouté ✓' : 'Ajouter'}
+                    </button>
+                  </div>
                 </figcaption>
-              </figure>
+              </Reveal>
             ))}
           </div>
         </div>
@@ -505,12 +621,16 @@ export default function Hera() {
           </Reveal>
 
           <div className="h-palette">
-            {PALETTE.map((kind) => (
-              <button type="button" className="h-chip" key={kind} onPointerDown={onPaletteDown(kind)}>
-                <span><Glyph kind={kind} size={44} /></span>
-                <span className="label">{PALETTE_LABELS[kind]}</span>
-              </button>
-            ))}
+            {PALETTE.map((kind) => {
+              const prod = productByKind(kind)
+              return (
+                <button type="button" className="h-chip" key={kind} onPointerDown={onPaletteDown(kind)}>
+                  <span><Glyph kind={kind} size={44} /></span>
+                  <span className="label">{PALETTE_LABELS[kind]}</span>
+                  {prod && <span className="chip-price">{formatPrice(prod.price)}</span>}
+                </button>
+              )
+            })}
           </div>
 
           <div className="h-table" ref={tableRef}>
@@ -533,9 +653,22 @@ export default function Hera() {
             ))}
           </div>
 
+          <div className={`h-tally ${placed.length ? 'is-on' : ''}`}>
+            <span className="h-tally-count">{placed.length} pièce{placed.length > 1 ? 's' : ''} sur la table</span>
+            <span className="h-tally-dot" aria-hidden="true">✺</span>
+            <span className="h-tally-total">{formatPrice(dresserTotal)}</span>
+          </div>
+
           <Reveal className="h-dresser-foot">
             <button type="button" className="h-clear" onClick={() => setPlaced([])}>↺ tout retirer</button>
-            <a className="h-btn h-btn-gold" href="#contact">Demander ce dressage</a>
+            <button
+              type="button"
+              className="h-btn h-btn-gold"
+              disabled={!placed.length}
+              onClick={addDressageToCart}
+            >
+              Ajouter ce dressage au panier
+            </button>
           </Reveal>
         </div>
       </section>
@@ -560,6 +693,47 @@ export default function Hera() {
               <div className="h-row"><span>Heures</span><span className="val">10h — 20h</span></div>
               <div className="h-row"><span>Instagram</span><span className="val teal">@heragoddesstn</span></div>
             </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ---------- LE FIL (Instagram) ---------- */}
+      <section className="h-section h-fil" id="fil">
+        <div className="h-wrap">
+          <Reveal className="h-fil-head">
+            <div>
+              <div className="h-eyebrow">№ 05 — le fil</div>
+              <h2 className="h-h2">Le fil</h2>
+              <span className="h-gild" aria-hidden="true" />
+            </div>
+            <a className="h-fil-handle" href={IG_URL} target="_blank" rel="noopener noreferrer">
+              <span className="at">@{IG_HANDLE}</span>
+              <span className="sub">{IG_FOLLOWERS} abonnés · Instagram ↗</span>
+            </a>
+          </Reveal>
+
+          <div className="h-fil-grid">
+            {IG_FEED.map((post, i) => (
+              <a
+                key={post.code}
+                className="h-fil-tile"
+                href={post.permalink}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ transitionDelay: `${(i % 5) * 0.05}s` }}
+              >
+                <img src={post.file} alt={post.caption} loading="lazy" />
+                <span className="h-fil-veil" aria-hidden="true" />
+                <span className="h-fil-cap">
+                  <span className="glyph">✻</span>
+                  {post.caption}
+                </span>
+              </a>
+            ))}
+          </div>
+
+          <Reveal className="h-fil-foot">
+            <a className="h-btn h-btn-ghost" href={IG_URL} target="_blank" rel="noopener noreferrer">Suivre sur Instagram</a>
           </Reveal>
         </div>
       </section>
@@ -639,6 +813,123 @@ export default function Hera() {
           </div>
         </div>
       </footer>
+
+      {/* ---------- PRODUCT MODAL ---------- */}
+      {activeProduct && (
+        <div className="h-modal" role="dialog" aria-modal="true" aria-label={activeProduct.name}>
+          <div className="h-modal-scrim" onClick={() => setActiveId(null)} />
+          <div className="h-modal-card">
+            <button type="button" className="h-modal-close" onClick={() => setActiveId(null)} aria-label="Fermer">×</button>
+            <div className="h-modal-view">
+              <div className={`h-plate h-plate-lg ${activeProduct.image ? 'has-photo' : ''}`}>
+                <span className="roman">{CATEGORY_LABEL[activeProduct.category]}</span>
+                {activeProduct.image ? (
+                  <img className="h-plate-img" src={activeProduct.image} alt={activeProduct.name} />
+                ) : (
+                  <>
+                    <Glyph kind={activeProduct.kind} size={150} />
+                    <span className="stub">photographie à venir</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="h-modal-info">
+              <span className="h-eyebrow">{CATEGORY_LABEL[activeProduct.category]}</span>
+              <h3 className="h-modal-name">{activeProduct.name}</h3>
+              <p className="h-modal-blurb">{activeProduct.blurb}</p>
+              <div className="h-modal-rows">
+                <div className="h-row"><span>Matière</span><span className="val">{activeProduct.materials}</span></div>
+                <div className="h-row"><span>Vendu</span><span className="val">{activeProduct.unit}</span></div>
+                <div className="h-row"><span>Prix</span><span className="val teal">{formatPrice(activeProduct.price)}</span></div>
+              </div>
+              <div className="h-modal-cta">
+                <button
+                  type="button"
+                  className={`h-btn h-btn-solid ${added === activeProduct.id ? 'is-added' : ''}`}
+                  onClick={() => addToCart(activeProduct.id)}
+                >
+                  {added === activeProduct.id ? 'Ajouté ✓' : 'Ajouter au panier'}
+                </button>
+                <a
+                  className="h-btn h-btn-gold"
+                  href={whatsappOrder(
+                    [{ name: activeProduct.name, price: activeProduct.price, qty: 1 }],
+                    activeProduct.price,
+                    `Bonjour Hera \u273A, je souhaite commander « ${activeProduct.name} » :`,
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Commander sur WhatsApp
+                </a>
+              </div>
+              <p className="h-modal-note">Commande & livraison confirmées par message — Hammamet & environs.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- PANIER DRAWER ---------- */}
+      <div className={`h-drawer-wrap ${cartOpen ? 'is-open' : ''}`} aria-hidden={!cartOpen}>
+        <div className="h-drawer-scrim" onClick={() => setCartOpen(false)} />
+        <aside className="h-drawer" role="dialog" aria-modal="true" aria-label="Votre panier">
+          <div className="h-drawer-head">
+            <div>
+              <div className="h-eyebrow">votre panier</div>
+              <h3 className="h-drawer-title">Le dressage</h3>
+            </div>
+            <button type="button" className="h-modal-close" onClick={() => setCartOpen(false)} aria-label="Fermer">×</button>
+          </div>
+
+          {cartLines.length === 0 ? (
+            <div className="h-drawer-empty">
+              <span className="orn">❧</span>
+              <p>Votre panier est vide.</p>
+              <button type="button" className="h-clear" onClick={() => setCartOpen(false)}>parcourir la boutique</button>
+            </div>
+          ) : (
+            <>
+              <div className="h-drawer-lines">
+                {cartLines.map((l) => (
+                  <div className="h-line" key={l.id}>
+                    <div className={`h-line-glyph ${l.image ? 'has-photo' : ''}`}>
+                      {l.image ? <img src={l.image} alt="" /> : <Glyph kind={l.kind} size={44} />}
+                    </div>
+                    <div className="h-line-body">
+                      <h4>{l.name}</h4>
+                      <span className="h-line-price">{formatPrice(l.price)} · {l.unit}</span>
+                      <div className="h-qty">
+                        <button type="button" onClick={() => setQty(l.id, l.qty - 1)} aria-label="Retirer un">−</button>
+                        <span>{l.qty}</span>
+                        <button type="button" onClick={() => setQty(l.id, l.qty + 1)} aria-label="Ajouter un">+</button>
+                        <button type="button" className="h-line-remove" onClick={() => removeFromCart(l.id)}>retirer</button>
+                      </div>
+                    </div>
+                    <div className="h-line-sum">{formatPrice(l.price * l.qty)}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="h-drawer-foot">
+                <div className="h-drawer-total">
+                  <span>Total</span>
+                  <span className="val">{formatPrice(cartTotal)}</span>
+                </div>
+                <a
+                  className="h-btn h-btn-gold h-drawer-order"
+                  href={whatsappOrder(cartLines, cartTotal)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Commander sur WhatsApp
+                </a>
+                <button type="button" className="h-clear" onClick={clearCart}>↺ vider le panier</button>
+                <p className="h-drawer-note">La commande s’ouvre dans WhatsApp — nous confirmons prix, stock & livraison par message.</p>
+              </div>
+            </>
+          )}
+        </aside>
+      </div>
 
       {intro && (
         <div className="h-intro" ref={introRef} aria-hidden="true">
